@@ -1,0 +1,252 @@
+loadstring([[
+local CoreGui = game:GetService("CoreGui")
+local VIM = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local GuiService = game:GetService("GuiService")
+
+if CoreGui:FindFirstChild("F3BAutoClicker") then
+    CoreGui.F3BAutoClicker:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "F3BAutoClicker"
+ScreenGui.Parent = CoreGui
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- ========== MAIN PANEL ==========
+local SidePanel = Instance.new("Frame")
+SidePanel.Size = UDim2.new(0, 110, 0, 210)
+SidePanel.Position = UDim2.new(1, -150, 0.32, 0)
+SidePanel.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
+SidePanel.BackgroundTransparency = 0.12
+SidePanel.BorderSizePixel = 0
+SidePanel.Active = true
+SidePanel.Parent = ScreenGui
+
+local PanelCorner = Instance.new("UICorner")
+PanelCorner.CornerRadius = UDim.new(0, 12)
+PanelCorner.Parent = SidePanel
+
+local PanelStroke = Instance.new("UIStroke")
+PanelStroke.Color = Color3.fromRGB(50, 50, 55)
+PanelStroke.Thickness = 1
+PanelStroke.Transparency = 0.35
+PanelStroke.Parent = SidePanel
+
+-- ========== STATE ==========
+local ClickPositions = {}
+local IsClicking = false
+local ClickConnection = nil
+local ClickInterval = 1 -- default 1 second
+
+-- ========== DRAGGING ==========
+local function makeElementDraggable(element, isMainPanel)
+    local dragging = false
+    local dragInput, dragStart, startPos
+
+    element.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            element:SetAttribute("BeingDragged", true)
+            if not isMainPanel then
+                element.BackgroundTransparency = 0.65
+            end
+            dragStart = input.Position
+            startPos = element.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    element:SetAttribute("BeingDragged", false)
+                    if not isMainPanel then
+                        element.BackgroundTransparency = 0.3
+                    end
+                end
+            end)
+        end
+    end)
+
+    element.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            local newOffsetX = startPos.X.Offset + delta.X
+            local newOffsetY = startPos.Y.Offset + delta.Y
+            local screenSize = ScreenGui.AbsoluteSize
+
+            if isMainPanel then
+                local maxX = screenSize.X - element.AbsoluteSize.X
+                local maxY = screenSize.Y - element.AbsoluteSize.Y
+                element.Position = UDim2.new(0, math.clamp(newOffsetX, 0, maxX), 0, math.clamp(newOffsetY, 0, maxY))
+            else
+                element.Position = UDim2.new(0, newOffsetX, 0, newOffsetY)
+            end
+        end
+    end)
+end
+
+makeElementDraggable(SidePanel, true)
+
+-- ========== BUTTON HELPER ==========
+local function createBtn(color, sizeX, sizeY, posX, posY, text, textSize, parent)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, sizeX, 0, sizeY)
+    btn.Position = UDim2.new(0, posX, 0, posY)
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = textSize
+    btn.AutoButtonColor = true
+    btn.BorderSizePixel = 0
+    btn.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = btn
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Thickness = 1
+    stroke.Transparency = 0.82
+    stroke.Parent = btn
+
+    return btn
+end
+
+-- ========== BUTTONS ==========
+local SpawnBtn = createBtn(Color3.fromRGB(41, 128, 185), 94, 32, 8, 10, "+", 20, SidePanel)
+local PlayBtn  = createBtn(Color3.fromRGB(39, 174, 96), 94, 32, 8, 48, "Start", 15, SidePanel)
+local PauseBtn = createBtn(Color3.fromRGB(192, 57, 43), 94, 32, 8, 86, "Clear/Stop", 13, SidePanel)
+
+-- Interval controls
+local IntervalLabel = Instance.new("TextLabel")
+IntervalLabel.Size = UDim2.new(0, 94, 0, 18)
+IntervalLabel.Position = UDim2.new(0, 8, 0, 126)
+IntervalLabel.BackgroundTransparency = 1
+IntervalLabel.Text = "Interval (s)"
+IntervalLabel.TextColor3 = Color3.fromRGB(180, 180, 185)
+IntervalLabel.Font = Enum.Font.Gotham
+IntervalLabel.TextSize = 12
+IntervalLabel.Parent = SidePanel
+
+local IntervalBox = Instance.new("TextBox")
+IntervalBox.Size = UDim2.new(0, 94, 0, 28)
+IntervalBox.Position = UDim2.new(0, 8, 0, 146)
+IntervalBox.BackgroundColor3 = Color3.fromRGB(30, 30, 34)
+IntervalBox.Text = "1"
+IntervalBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+IntervalBox.Font = Enum.Font.GothamBold
+IntervalBox.TextSize = 15
+IntervalBox.ClearTextOnFocus = false
+IntervalBox.Parent = SidePanel
+
+local boxCorner = Instance.new("UICorner")
+boxCorner.CornerRadius = UDim.new(0, 7)
+boxCorner.Parent = IntervalBox
+
+local boxStroke = Instance.new("UIStroke")
+boxStroke.Color = Color3.fromRGB(60, 60, 65)
+boxStroke.Thickness = 1
+boxStroke.Parent = IntervalBox
+
+IntervalBox.FocusLost:Connect(function()
+    local num = tonumber(IntervalBox.Text)
+    if num and num > 0 then
+        ClickInterval = math.clamp(num, 0.05, 60)
+        IntervalBox.Text = tostring(ClickInterval)
+    else
+        IntervalBox.Text = tostring(ClickInterval)
+    end
+end)
+
+-- ========== SPAWN TARGET BOX ==========
+SpawnBtn.MouseButton1Click:Connect(function()
+    if #ClickPositions >= 1 then return end
+
+    local TargetBox = Instance.new("Frame")
+    TargetBox.Size = UDim2.new(0, 50, 0, 50)
+    local screenCenter = ScreenGui.AbsoluteSize
+    TargetBox.Position = UDim2.new(0, (screenCenter.X / 2) - 25, 0, (screenCenter.Y / 2) - 25)
+    TargetBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    TargetBox.BackgroundTransparency = 0.3
+    TargetBox.BorderSizePixel = 0
+    TargetBox.Active = true
+    TargetBox.Parent = ScreenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = TargetBox
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(41, 128, 185)
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.25
+    stroke.Parent = TargetBox
+
+    local CenterDot = Instance.new("Frame")
+    CenterDot.Size = UDim2.new(0, 6, 0, 6)
+    CenterDot.Position = UDim2.new(0.5, -3, 0.5, -3)
+    CenterDot.BackgroundColor3 = Color3.fromRGB(41, 128, 185)
+    CenterDot.BorderSizePixel = 0
+    CenterDot.Parent = TargetBox
+
+    local dotCorner = Instance.new("UICorner")
+    dotCorner.CornerRadius = UDim.new(1, 0)
+    dotCorner.Parent = CenterDot
+
+    TargetBox:SetAttribute("BeingDragged", false)
+    makeElementDraggable(TargetBox, false)
+    table.insert(ClickPositions, TargetBox)
+end)
+
+-- ========== CLICK LOGIC ==========
+PlayBtn.MouseButton1Click:Connect(function()
+    if IsClicking then return end
+    IsClicking = true
+
+    local lastClick = 0
+
+    ClickConnection = RunService.Heartbeat:Connect(function()
+        local now = tick()
+        if now - lastClick < ClickInterval then return end
+        lastClick = now
+
+        for _, box in ipairs(ClickPositions) do
+            if box and box.Parent and box:GetAttribute("BeingDragged") == false then
+                local absPos = box.AbsolutePosition
+                local absSize = box.AbsoluteSize
+
+                -- Pure center – no extra inset when IgnoreGuiInset is true
+                local targetX = absPos.X + absSize.X / 2
+                local targetY = absPos.Y + absSize.Y / 2
+
+                VIM:SendMouseButtonEvent(targetX, targetY, 0, true, game, 1)
+                VIM:SendMouseButtonEvent(targetX, targetY, 0, false, game, 1)
+            end
+        end
+    end)
+end)
+
+PauseBtn.MouseButton1Click:Connect(function()
+    IsClicking = false
+    if ClickConnection then
+        ClickConnection:Disconnect()
+        ClickConnection = nil
+    end
+    for _, box in ipairs(ClickPositions) do
+        if box and box.Parent then
+            box:Destroy()
+        end
+    end
+    table.clear(ClickPositions)
+end)
+]])()
