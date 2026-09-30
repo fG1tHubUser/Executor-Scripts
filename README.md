@@ -1,2 +1,2 @@
 # Executor-Scripts
-Personal Scripts for executors
+Personal Scripts
