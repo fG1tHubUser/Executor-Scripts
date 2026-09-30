@@ -1,0 +1,619 @@
+-- Advanced Anti AFK
+-- Walk + Jump + Chat
+-- Clean Randomized Word / Safe Emoji Pool
+-- UI Parented to CoreGui / gethui() for stealth
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+
+local player = Players.LocalPlayer
+
+local enabled = false
+local walkConn = nil
+local chatThread = nil
+
+local direction = 1
+local SWITCH_TIME = 3.5
+local nextSwitch = 0
+local nextJump = 0
+
+-- ============================================================
+-- GUI (CoreGui Stealth)
+-- ============================================================
+
+-- Use gethui() if the executor supports it (safest), otherwise fallback to CoreGui
+local uiParent = (gethui and gethui()) or CoreGui
+
+local oldGui = uiParent:FindFirstChild("WalkAndChat")
+if oldGui then
+	oldGui:Destroy()
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "WalkAndChat"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 50
+gui.Parent = uiParent
+
+-- Main card
+local card = Instance.new("Frame")
+card.Name = "Card"
+card.AnchorPoint = Vector2.new(0, 0.5)
+card.Position = UDim2.new(0, 12, 0.53, 0)
+card.Size = UDim2.new(0, 190, 0, 76)
+card.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+card.BorderSizePixel = 0
+card.Parent = gui
+
+local cardCorner = Instance.new("UICorner")
+cardCorner.CornerRadius = UDim.new(0, 12)
+cardCorner.Parent = card
+
+local cardStroke = Instance.new("UIStroke")
+cardStroke.Color = Color3.fromRGB(65, 65, 72)
+cardStroke.Thickness = 1
+cardStroke.Transparency = 0.25
+cardStroke.Parent = card
+
+local scale = Instance.new("UIScale")
+scale.Scale = 1
+scale.Parent = card
+
+-- ============================================================
+-- TITLE
+-- ============================================================
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.BackgroundTransparency = 1
+title.Position = UDim2.new(0, 13, 0, 8)
+title.Size = UDim2.new(1, -60, 0, 20)
+title.Font = Enum.Font.GothamBold
+title.Text = "Walk + Chat"
+title.TextColor3 = Color3.fromRGB(245, 245, 248)
+title.TextSize = 14
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = card
+
+-- ============================================================
+-- STATUS
+-- ============================================================
+
+local status = Instance.new("TextLabel")
+status.Name = "Status"
+status.BackgroundTransparency = 1
+status.Position = UDim2.new(0, 13, 0, 31)
+status.Size = UDim2.new(1, -88, 0, 18)
+status.Font = Enum.Font.Gotham
+status.Text = "Inactive"
+status.TextColor3 = Color3.fromRGB(150, 150, 158)
+status.TextSize = 11
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Parent = card
+
+-- ============================================================
+-- STATUS DOT
+-- ============================================================
+
+local dot = Instance.new("Frame")
+dot.Name = "StatusDot"
+dot.AnchorPoint = Vector2.new(0, 0.5)
+dot.Position = UDim2.new(1, -70, 0, 18)
+dot.Size = UDim2.new(0, 8, 0, 8)
+dot.BackgroundColor3 = Color3.fromRGB(100, 100, 108)
+dot.BorderSizePixel = 0
+dot.Parent = card
+
+local dotCorner = Instance.new("UICorner")
+dotCorner.CornerRadius = UDim.new(1, 0)
+dotCorner.Parent = dot
+
+-- ============================================================
+-- TOGGLE BUTTON
+-- ============================================================
+
+local toggle = Instance.new("TextButton")
+toggle.Name = "Toggle"
+toggle.AnchorPoint = Vector2.new(1, 0.5)
+toggle.Position = UDim2.new(1, -12, 0, 43)
+toggle.Size = UDim2.new(0, 60, 0, 25)
+toggle.BackgroundColor3 = Color3.fromRGB(45, 45, 51)
+toggle.BorderSizePixel = 0
+toggle.AutoButtonColor = false
+toggle.Font = Enum.Font.GothamBold
+toggle.Text = "OFF"
+toggle.TextColor3 = Color3.fromRGB(190, 190, 196)
+toggle.TextSize = 10
+toggle.Parent = card
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 7)
+toggleCorner.Parent = toggle
+
+-- ============================================================
+-- POOL INFO
+-- ============================================================
+
+local poolInfo = Instance.new("TextLabel")
+poolInfo.Name = "PoolInfo"
+poolInfo.BackgroundTransparency = 1
+poolInfo.Position = UDim2.new(0, 13, 0, 52)
+poolInfo.Size = UDim2.new(1, -88, 0, 16)
+poolInfo.Font = Enum.Font.Gotham
+poolInfo.Text = "Random pool"
+poolInfo.TextColor3 = Color3.fromRGB(105, 105, 115)
+poolInfo.TextSize = 9
+poolInfo.TextXAlignment = Enum.TextXAlignment.Left
+poolInfo.Parent = card
+
+-- ============================================================
+-- DRAGGING
+-- ============================================================
+
+local dragging = false
+local dragInput = nil
+local dragStart = nil
+local startPosition = nil
+
+local function updateDrag(input)
+	if not dragging then
+		return
+	end
+
+	local delta = input.Position - dragStart
+	card.Position = UDim2.new(
+		startPosition.X.Scale,
+		startPosition.X.Offset + delta.X,
+		startPosition.Y.Scale,
+		startPosition.Y.Offset + delta.Y
+	)
+end
+
+card.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+
+		dragging = true
+		dragStart = input.Position
+		startPosition = card.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+card.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch then
+
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput then
+		updateDrag(input)
+	end
+end)
+
+-- ============================================================
+-- MESSAGE POOL & SANITIZER
+-- ============================================================
+
+local messages = {}
+local seen = {}
+
+local function add(message)
+	if type(message) ~= "string" then
+		return
+	end
+
+	local trimmed = message:match("^%s*(.-)%s*$")
+	if not trimmed or trimmed == "" then
+		return
+	end
+
+	-- Reject standalone single letters (e.g. "a", "k", "z")
+	if #trimmed == 1 and trimmed:match("%a") then
+		return
+	end
+
+	-- Reject short 1-2 character ASCII fragments/gibberish
+	if #trimmed <= 2 and trimmed:match("^%a+$") then
+		return
+	end
+
+	if not seen[trimmed] then
+		seen[trimmed] = true
+		table.insert(messages, trimmed)
+	end
+end
+
+-- ============================================================
+-- LARGE WORD POOL (Complete Words Only)
+-- ============================================================
+
+local words = {
+	"velvet","static","orbit","marble","cactus","lantern","ripple",
+	"pixel","copper","puddle","crayon","window","tunnel","pepper",
+	"button","pocket","magnet","ceiling","plastic","banana","carpet",
+	"bucket","mirror","pencil","blanket","drawer","helmet","planet",
+	"bottle","ladder","napkin","sponge","battery","puzzle","cookie",
+	"cereal","pancake","toaster","cabinet","curtain","elevator",
+	"backpack","shoebox","raincoat","sticker","notebook","eraser",
+	"zipper","hallway","basement","garage","attic","pavement",
+	"mailbox","traffic","floor","orange","purple","yellow","silver",
+	"rubber","cardboard","wooden","metal","paper","compass","satellite",
+	"fountain","volcano","telescope","antenna","eclipse","pyramid",
+	"carousel","fossil","suitcase","rainbow","thermostat","microwave",
+	"flashlight","calendar","keychain","shoelace","doorbell",
+	"windshield","headlight","crosswalk","staircase","warehouse",
+	"lighthouse","parking","chimney","paperclip","toothpick",
+	"doorstop","bookshelf","cupholder","keypad","headphones",
+	"lightbulb","dustpan","floorboard","doorframe","handrail",
+	"clipboard","lunchbox","toolbox","birdhouse","flowerpot",
+	"screwdriver","paintbrush","thermometer","stopwatch","sidewalk",
+	"doormat","cupboard","backboard","sidepanel","notepad","coaster",
+	"stairwell","doorway","rooftop","dashboard","keyhole","doorknob",
+	"lightpost","streetlight","driveway","roadway","bridge","railroad",
+	"subway","platform","station","ticket","backseat","headrest",
+	"glovebox","trunk","bumper","taillight","speedometer","odometer",
+	"gasoline","engine","radiator","wrench","screw","bolt","washer",
+	"hinge","handle","switch","socket","outlet","charger","cable",
+	"keyboard","mouse","monitor","speaker","camera","remote",
+	"controller","console","screen","adapter","router","printer",
+	"scanner","folder","bookmark","envelope","package","receipt",
+	"stamp","ruler","calculator","glue","marker","highlighter",
+	"canvas","brush","palette","frame","poster","magazine","newspaper",
+	"dictionary","binder","stapler","rubberband","pencilcase","jacket",
+	"sweater","hoodie","sneaker","sock","glove","scarf","hat","wallet",
+	"watch","bracelet","necklace","towel","pillow","mattress",
+	"bedsheet","pillowcase","rug","couch","sofa","chair","table",
+	"desk","shelf","closet","lamp","fan","heater","refrigerator",
+	"freezer","blender","kettle","plate","bowl","cup","mug","fork",
+	"spoon","knife","jar","container","basket","tray","teapot",
+	"pitcher","pantry","oven","grill","strainer","colander","spatula",
+	"ladle","whisk","tongs","canister","carton","wrapper","crumb",
+	"hammer","drill","saw","nail","clamp","pliers","chisel","mallet",
+	"bracket","hook","chain","rope","cord","tape","roller","shovel",
+	"rake","broom","mop","vacuum","hose","sprinkler","jumpsuit",
+	"uniform","vest","boot","slipper","jeans","shirt","pajamas","apron",
+	"mittens","cap","vehicle","bicycle","scooter","motorcycle","truck",
+	"trailer","bus","train","airplane","runway","hangar","cockpit",
+	"steeringwheel","gearbox","brake","pedal","tire","wheel","axle",
+	"licenseplate","building","office","store","market","theater",
+	"school","library","hospital","airport","terminal","entrance",
+	"exit","corridor","tower","castle","palace","courtyard","garden",
+	"greenhouse","playground","stadium","museum","aquarium","workshop",
+	"factory","flower","tree","branch","leaf","grass","stone","pebble",
+	"rock","sand","mud","cloud","rain","snow","wind","thunder",
+	"lightning","sunlight","moonlight","shadow","sunset","sunrise",
+	"fog","mist","ocean","river","lake","waterfall","mountain",
+	"forest","desert","island","beach","cave","meadow","valley",
+	"cliff","hill","pond","stream","creek","shore","coast","wave",
+	"tide","shell","coral","moss","fern","vine","root","bush",
+	"planet","meteor","comet","asteroid","galaxy","nebula","rocket",
+	"spaceship","astronaut","laboratory","microscope","crystal",
+	"mineral","molecule","atom","gravity","specimen","beaker","flask",
+	"testtube","apple","lemon","waffle","toast","cracker","pretzel",
+	"popcorn","caramel","chocolate","coconut","pumpkin","carrot",
+	"potato","tomato","lettuce","pickle","muffin","cupcake","donut",
+	"bagel","bread","butter","cheese","yogurt","pudding","noodle",
+	"rice","cinnamon","vanilla","ginger","salt","sugar","honey","jam",
+	"jelly","ribbon","string","thread","needle","fabric","photograph",
+	"portrait","painting","sculpture","statue","monument","box","crate",
+	"barrel","cooler","umbrella","padlock","wheel","handlebar","bell",
+	"seat","bench","furniture","counter","tabletop","desktop","armrest",
+	"backrest","wallpaper","cushion","vase","bag","satchel","briefcase",
+	"label","clock","street","avenue","highway",
+	"intersection","roundabout"
+}
+
+for _, word in ipairs(words) do
+	add(word)
+end
+
+-- ============================================================
+-- SAFE EMOJIS (Stripped of broken font variation selectors)
+-- ============================================================
+
+local emojis = {
+	"🌵","🍌","🍋","🍊","🍎","🥕",
+	"🌸","🌹","🌷","🌻","🌺","🌼",
+	"🌳","🌲","🌴","🌿","🍃","🍂","🍁","🌱",
+	"🪐","🌋","🌊","🌈",
+	"🐟","🐠","🐡","🐸","🐰","🦆","🐢","🦀",
+	"🦊","🐧","🐙",
+	"🔥","💥","🔋",
+	"📷","📱","💻",
+	"🎧","🎵","🎮","🧩","🎁","🎈","🎨","🎲","🎯",
+	"🧸","🎸","🎹","🥁",
+	"🚀","🚗","🚕","🚌","🚆","🚂","✈️",
+	"🚲","🛴","🚁","🛸","🛰️",
+	"🏠","🏡","🏢","🏰",
+	"💡","✏️","📖","📓",
+	"🔨","🪣","🧽","🧹",
+	"📦","🔔","🚦",
+	"🗺️","🧳","💎","🪙","👑",
+	"🔭","🧭","🧪","🔬","🍄","🍀"
+}
+
+for _, emoji in ipairs(emojis) do
+	add(emoji)
+end
+
+-- ============================================================
+-- SAFE EMOJI COMBOS
+-- ============================================================
+
+local emojiCombos = {
+	"🌵🌸","🌵🌵","🌸🌹","🌸🌷","🌹🌷",
+	"🌻🌸","🌳🍃","🌲🍂","🌴🌿","🌱🍃",
+	"🍃🍂","🌿🌸","🌿🌺",
+	"🌋🌊","🌊🐟","🐟🐠","🐠🐡","🐸🐢",
+	"🐰🐸","🦆🐢","🦀🐟","🦊🍃","🐙🌊",
+	"🎮🎯","🎧🎵","🎁🎈","🎲🎯",
+	"🧸🎈","🎸🎵","🎹🎵","🥁🎵","🚀🪐",
+	"🚗🚲","🚆✈️","🚁🚀","🛸🪐","🛰️🪐",
+	"🏠🌳","📷📱",
+	"💎✨","👑✨","🔭🪐","🧭🗺️",
+	"🧹🪣","🧽🧼","🔔🚪","🚦🚗",
+	"🗺️🧭","🧳✈️",
+	"🌸🦋","🌳🍃🌿",
+	"🐸🌿🍃","🐰🌸🍃","🦆🌊🐟","🐢🌊🍃",
+	"🌵🌵🌸","🌊🐟🌊",
+	"🎮🎯","🧭🗺️🚗","🚦🚗💡",
+	"🛸🪐","🌺🌸","🌻🌿",
+	"🍀🌱🌿","🍄🌿🌲","🌾🌻🍃",
+	"🦊🌲🍃",
+	"📱💻🎧","🎮🎯","🎸🎹🥁",
+	"🚗🚦🛣️","✈️🧳🗺️",
+	"🚀🛰️🪐","🏠🌳🌸","🏡🌿🌸",
+	"💡✨","🧹🧽🪣",
+	"📦🏷️","🗺️🧭🚗","📖📓✏️",
+	"🎁🎈","🎨🖌️"
+}
+
+for _, combo in ipairs(emojiCombos) do
+	add(combo)
+end
+
+-- ============================================================
+-- RANDOM MESSAGE MEMORY
+-- ============================================================
+
+local recentMessages = {}
+local RECENT_MEMORY = 80
+
+local function wasRecentlyUsed(message)
+	for i = 1, #recentMessages do
+		if recentMessages[i] == message then
+			return true
+		end
+	end
+	return false
+end
+
+local function rememberMessage(message)
+	table.insert(recentMessages, message)
+	if #recentMessages > RECENT_MEMORY then
+		table.remove(recentMessages, 1)
+	end
+end
+
+-- ============================================================
+-- SELECTION
+-- ============================================================
+
+local function getRandomMessage()
+	if #messages == 0 then
+		return "window"
+	end
+
+	for _ = 1, 50 do
+		local candidate = messages[math.random(1, #messages)]
+		if not wasRecentlyUsed(candidate) then
+			rememberMessage(candidate)
+			return candidate
+		end
+	end
+
+	local candidate = messages[math.random(1, #messages)]
+	rememberMessage(candidate)
+	return candidate
+end
+
+-- ============================================================
+-- CHAT DISPATCH
+-- ============================================================
+
+local function sendChat(message)
+	pcall(function()
+		local channels = TextChatService:FindFirstChild("TextChannels")
+		if channels then
+			local channel = channels:FindFirstChild("RBXGeneral")
+			if channel then
+				channel:SendAsync(message)
+			end
+		end
+	end)
+
+	pcall(function()
+		local events = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+		if events then
+			local request = events:FindFirstChild("SayMessageRequest")
+			if request then
+				request:FireServer(message, "All")
+			end
+		end
+	end)
+end
+
+-- ============================================================
+-- MOVEMENT
+-- ============================================================
+
+local function getHumanoid()
+	local character = player.Character
+	if not character then
+		return nil
+	end
+	return character:FindFirstChildOfClass("Humanoid")
+end
+
+local function moveStick(dir)
+	-- Movement relies on the TouchGui which only exists in PlayerGui
+	local pg = player:FindFirstChild("PlayerGui")
+	if not pg then return end
+
+	local touchGui = pg:FindFirstChild("TouchGui")
+	if not touchGui then return end
+
+	local frame = touchGui:FindFirstChild("TouchControlFrame")
+	if not frame then return end
+
+	local dyn = frame:FindFirstChild("DynamicThumbstickFrame")
+	if not dyn then return end
+
+	local endImg = dyn:FindFirstChild("ThumbstickEnd")
+	if not endImg then return end
+
+	endImg.Visible = true
+	endImg.AnchorPoint = Vector2.new(0.5, 0.5)
+
+	local cx = dyn.AbsoluteSize.X * 0.5
+	local cy = dyn.AbsoluteSize.Y * 0.55
+	local offset = (dir == 1) and -65 or 65
+
+	endImg.Position = UDim2.new(0, cx, 0, cy + offset)
+end
+
+-- ============================================================
+-- STATE CONTROLLERS
+-- ============================================================
+
+local function stopAll()
+	if walkConn then
+		walkConn:Disconnect()
+		walkConn = nil
+	end
+
+	if chatThread then
+		task.cancel(chatThread)
+		chatThread = nil
+	end
+
+	local humanoid = getHumanoid()
+	if humanoid then
+		humanoid:Move(Vector3.zero, true)
+	end
+end
+
+local function startAll()
+	stopAll()
+
+	direction = 1
+	nextSwitch = tick() + SWITCH_TIME
+	nextJump = tick() + math.random(5, 9)
+
+	walkConn = RunService.RenderStepped:Connect(function()
+		local humanoid = getHumanoid()
+		if not humanoid or humanoid.Health <= 0 then
+			return
+		end
+
+		humanoid:Move(Vector3.new(0, 0, -direction), true)
+		moveStick(direction)
+
+		if tick() >= nextSwitch then
+			direction = -direction
+			nextSwitch = tick() + SWITCH_TIME
+		end
+
+		if tick() >= nextJump then
+			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+			nextJump = tick() + math.random(6, 12)
+		end
+	end)
+
+	chatThread = task.spawn(function()
+		task.wait(1)
+		if enabled then
+			sendChat(getRandomMessage())
+		end
+
+		while enabled do
+			task.wait(math.random(367, 512))
+			if enabled then
+				sendChat(getRandomMessage())
+			end
+		end
+	end)
+end
+
+-- ============================================================
+-- GUI UPDATER
+-- ============================================================
+
+local function updateGui()
+	if enabled then
+		toggle.Text = "ON"
+		toggle.BackgroundColor3 = Color3.fromRGB(38, 105, 72)
+		toggle.TextColor3 = Color3.fromRGB(225, 255, 235)
+
+		status.Text = "Active"
+		status.TextColor3 = Color3.fromRGB(125, 210, 155)
+
+		dot.BackgroundColor3 = Color3.fromRGB(80, 205, 125)
+		cardStroke.Color = Color3.fromRGB(65, 125, 90)
+	else
+		toggle.Text = "OFF"
+		toggle.BackgroundColor3 = Color3.fromRGB(45, 45, 51)
+		toggle.TextColor3 = Color3.fromRGB(190, 190, 196)
+
+		status.Text = "Inactive"
+		status.TextColor3 = Color3.fromRGB(150, 150, 158)
+
+		dot.BackgroundColor3 = Color3.fromRGB(100, 100, 108)
+		cardStroke.Color = Color3.fromRGB(65, 65, 72)
+	end
+end
+
+-- ============================================================
+-- EVENTS
+-- ============================================================
+
+toggle.MouseButton1Click:Connect(function()
+	enabled = not enabled
+	updateGui()
+
+	if enabled then
+		startAll()
+	else
+		stopAll()
+	end
+end)
+
+player.CharacterAdded:Connect(function()
+	if enabled then
+		task.wait(1)
+		startAll()
+	end
+end)
+
+-- ============================================================
+-- INITIALIZE
+-- ============================================================
+
+poolInfo.Text = tostring(#messages) .. " random messages"
+print("Walk + Chat loaded in CoreGui with " .. #messages .. " verified messages")
+updateGui()
