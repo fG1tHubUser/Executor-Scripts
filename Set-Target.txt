@@ -1,0 +1,60 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local TARGET = "d3sirab1e"
+
+-- 1. Find the Control Panel GUI elements
+local hub = PlayerGui:FindFirstChild("HubPanelGui") or PlayerGui:FindFirstChild("hub")
+if not hub then
+    warn("Could not find HubPanelGui / hub")
+    return
+end
+
+local textBox = hub:FindFirstChild("Username", true) 
+             or hub:FindFirstChildWhichIsA("TextBox", true)
+
+local statusLabel = hub:FindFirstChild("TextLabel", true) 
+                 or hub.Dashboard and hub.Dashboard:FindFirstChild("TextLabel")
+
+-- 2. Set the TextBox so the GUI looks correct
+if textBox then
+    textBox.Text = TARGET
+end
+
+-- 3. Do the real remote calls (this is what actually starts the task)
+local LookupIdentity = ReplicatedStorage:WaitForChild("LookupIdentity")
+local SetActivityMode = ReplicatedStorage:WaitForChild("SetActivityMode")
+
+local success, result = pcall(function()
+    return LookupIdentity:InvokeServer(TARGET)
+end)
+
+if success then
+    local userId = typeof(result) == "table" and (result.UserId or result[1] or result.Id) or result
+    if userId then
+        SetActivityMode:FireServer("user_social", tonumber(userId) or userId)
+        
+        -- 4. Manually update the status label so it matches what the game would show
+        if statusLabel then
+            statusLabel.Text = "Task set > " .. TARGET
+            statusLabel.TextColor3 = Color3.fromRGB(0, 255, 0) -- green like the real one
+        end
+        
+        print("Task successfully set for", TARGET, "(UserId:", userId, ")")
+    else
+        warn("Lookup returned no UserId")
+        if statusLabel then
+            statusLabel.Text = "User not found."
+            statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        end
+    end
+else
+    warn("Lookup failed:", result)
+    if statusLabel then
+        statusLabel.Text = "Lookup failed"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+    end
+end
